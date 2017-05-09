@@ -1,0 +1,17 @@
+version: "2"
+
+services:
+  # only one service here
+  gerrit:
+    image: rancher-server:5000/openfrontier/gerrit
+    environment:
+      AUTH_TYPE: DEVELOPMENT_BECOME_ANY_ACCOUNT
+      GERRIT_INIT_ARGS: '--install-plugin=download-commands'
+      #AUTH_TYPE: LDAP 
+      #LDAP_SERVER: ldap://ldap.server.address
+      #LDAP_ACCOUNTBASE=<ldap-basedn>
+    ports:
+      - "8082:8080"
+      - "29418:29418"
+    volumes:
+    - ./gerrit_data:/var/gerrit/review_site

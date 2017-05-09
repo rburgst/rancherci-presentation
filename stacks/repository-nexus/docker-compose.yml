@@ -1,0 +1,40 @@
+version: "2"
+
+services:
+  # main nexus service
+  nexus:
+    image: rancher-server:5000/sonatype/nexus3:latest
+    environment:
+      NEXUS_CONTEXT: nexus
+    volumes:
+      - "./nexus-data:/nexus-data"
+    ports:
+      - "8081:8081"
+      - "5000:5000"
+      - "6000:6000"
+    labels:
+      io.rancher.sidekicks: nexus-confd, nexus-provision
+  
+  # sidekick container that provides ability to provide a configuration via rancher 
+  # metadata
+  nexus-confd:
+    image: rancher-server:5000/wbrauneis/rancher-nexus-confd:latest
+    labels:
+      io.rancher.container.start_once: 'true'
+    restart: on-failure
+
+  # sidekick container that publishes and executes the provided groovy bootstrap 
+  # file via http upload
+  nexus-provision:
+    image: rancher-server:5000/wbrauneis/rancher-nexus-provision:latest
+    environment:
+      NEXUS_URL: http://nexus:8081/nexus
+    links:
+      - nexus:nexus
+    volumes_from:
+      - nexus-confd
+    entrypoint:
+      - /root/scripting/nexus_provision.sh
+    labels:
+      io.rancher.container.start_once: 'true'
+    restart: on-failure

@@ -1,0 +1,56 @@
+version: "2"
+
+services:
+  # main jenkins server
+  jenkins-primary:
+    image: rancher-server:5000/jenkins:alpine
+    entrypoint:
+    - /usr/share/jenkins/rancher-seed/jenkins.sh
+    ports:
+      - "8083:8080"
+    volumes_from:
+    - jenkins-plugins
+    - jenkins-seed
+    - jenkins-datavolume
+    labels:
+      io.rancher.sidekicks: jenkins-plugins,jenkins-datavolume,jenkins-seed
+      io.rancher.container.hostname_override: container_name
+
+  # stores all persistent jenkins files
+  jenkins-datavolume:
+    image: rancher-server:5000/busybox
+    entrypoint:
+    - chown
+    - -R
+    - 1000:1000
+    - /var/jenkins_home
+    volumes:
+    - ./jenkins_home:/var/jenkins_home
+    labels:
+      io.rancher.container.start_once: 'true'
+
+  # enables the provisioning of a seed job when jenkins is initially started
+  jenkins-seed:
+    image: rancher-server:5000/wbrauneis/rancher-jenkins-seed:latest
+
+  # installs optional needes plugins
+  jenkins-plugins:
+    image: rancher-server:5000/rancher/jenkins-plugins:v0.1.2
+
+  # enables to run build jobs inside docker containers in any swarm agent container
+  swarm-client:
+    image: rancher-server:5000/rancher/jenkins-slave:latest
+    environment:
+      JENKINS_USERNAME: jenkins
+      JENKINS_PASSWORD: password
+      JENKINS_MASTER: http://jenkins-primary:8080
+      SLAVE_EXECUTORS: 3
+    volumes:
+    - /var/run/docker.sock:/var/run/docker.sock
+    - /tmp:/tmp
+    # mounting this out to the host to make sure we dont always download all maven
+    # dependencies
+    - ./swarm-workspace:/home/jenkins-slave/workspace
+    links:
+    - jenkins-primary:jenkins-primary
+    user: root

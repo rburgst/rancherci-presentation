@@ -1,0 +1,240 @@
+swarm-client:
+  scale: 1
+  
+jenkins-primary:
+  scale: 1
+  start_on_create: true
+  metadata:
+    seed:
+      config: |-
+            import jenkins.model.*
+            import com.cloudbees.plugins.credentials.*
+            import com.cloudbees.plugins.credentials.common.*
+            import com.cloudbees.plugins.credentials.impl.*;
+            import com.cloudbees.plugins.credentials.domains.*
+            import com.cloudbees.jenkins.plugins.sshcredentials.impl.*
+            import hudson.model.*;
+            import hudson.plugins.sshslaves.*;
+            import hudson.security.*
+            import hudson.plugins.active_directory.*
+            import net.sf.json.*;
+            import com.sonyericsson.hudson.plugins.gerrit.trigger.*;
+            import com.sonyericsson.hudson.plugins.gerrit.trigger.PluginImpl;
+            import com.sonyericsson.hudson.plugins.gerrit.trigger.GerritServer;
+            import com.sonyericsson.hudson.plugins.gerrit.trigger.config.Config;
+
+
+            // 
+            // GLOBAL CONFIG
+            // 
+            def instance = Jenkins.getInstance()
+
+            // Number of Executers
+            // No jobs on master
+            instance.setNumExecutors(0)
+
+            // Location Configuration (Admin eMail and Base Url)
+            def location_config = JenkinsLocationConfiguration.get()
+            location_config.setAdminAddress("Jenkins Daemon <jenkins@mydomain.com>")
+            location_config.setUrl("http://rancher-agent-01:8083/") // Otherwise null job issue
+
+            location_config.save()
+
+            // Authorization 
+            //def strategy = new hudson.security.FullControlOnceLoggedInAuthorizationStrategy()
+            //strategy.setAllowAnonymousRead(false)
+            //instance.setAuthorizationStrategy(strategy)
+
+            instance.save()            
+
+
+            //
+            // MAIL SETTINGS
+            //
+            def desc = instance.getDescriptor("hudson.tasks.Mailer")
+
+            desc.setSmtpHost("smtp.server.address.here")
+            desc.setDefaultSuffix("@mydomain.com")
+            desc.setUseSsl(false)
+            desc.setCharset("UTF-8")
+            desc.save()
+
+
+            // 
+            // ENVIRONMENT VARIABLES
+            // 
+            globalNodeProperties = instance.getGlobalNodeProperties()
+            envVarsNodePropertyList = globalNodeProperties.getAll(hudson.slaves.EnvironmentVariablesNodeProperty.class)
+
+            newEnvVarsNodeProperty = null
+            envVars = null
+
+            if ( envVarsNodePropertyList == null || envVarsNodePropertyList.size() == 0 ) {
+              newEnvVarsNodeProperty = new hudson.slaves.EnvironmentVariablesNodeProperty();
+              globalNodeProperties.add(newEnvVarsNodeProperty)
+              envVars = newEnvVarsNodeProperty.getEnvVars()
+            } else {
+              envVars = envVarsNodePropertyList.get(0).getEnvVars()
+            }
+
+            // this will allow us to use the nexus URL inside of Jenkinsfiles without needing to hard code addresses
+            envVars.put("NEXUS_CONTEXTURL", "http://rancher-agent-01:8081/")
+            envVars.put("NEXUS_DOCKER_REGISTRY", "rancher-agent-01:5000")
+
+            instance.save()
+
+
+            //
+            // CREDENTIALS
+            //
+            Credentials c = (Credentials) new UsernamePasswordCredentialsImpl(CredentialsScope.GLOBAL,"6cc6afa8-0869-43f0-91a2-d306642ecafa", "Jenkins Credentials", "jenkins", "password")
+            SystemCredentialsProvider.getInstance().getStore().addCredentials(Domain.global(), c)
+
+            global_domain = Domain.global()
+
+            credentials_store =
+              Jenkins.instance.getExtensionList(
+                'com.cloudbees.plugins.credentials.SystemCredentialsProvider'
+              )[0].getStore()
+
+            credentials = new BasicSSHUserPrivateKey(
+              CredentialsScope.GLOBAL,
+              "6cc6afa8-0869-43f0-91a2-d306642ecafb",
+              "jenkins",
+              new BasicSSHUserPrivateKey.DirectEntryPrivateKeySource(
+              """-----BEGIN RSA PRIVATE KEY-----
+            MIIEpQIBAAKCAQEAsgukTJroFQqDzf9Fiii1SVolbZc0c3Itcl1wLBME7a/4rrAJ
+            DNeVyck0ZY7T3/PnvjyZylcjSenpauhYCvAkQPUFu9P9onBPuWhXYEF5NANhrYEz
+            w2OG1RfN/yWZ8aYuuo0n1+LGQviUr6DSF5JBJPoaz2pj8lkDrWDeRPDWB/LZZg3c
+            FOJBqV+KKDFE8wpWrGx176S5zAoMLnaOp3WUP/4LHh/6bQYA/l++ieIwQxn0zprz
+            8sr/8UV5YUaAl3dYV8wpMrKXqWitDCKlw1f5A344XMf7+pLhYXA+QYnGmqi5KhDv
+            TWyq8HHJrxI1EZMscJE3juUJdeAixvSXnsodiwIDAQABAoIBAGUAibITZnkZP/BK
+            Ue6wbTcxdm4XCuA682EfdJTsLS2RWCfxIREx831HMPwz7CntuZeH1U6d5Bz4HzxQ
+            ljGOTWK0HQ6Skh3mTLPHZ1npipJhILZGx1CeU0zrdia58/zL41Jc5S9pLEOttNt1
+            BfntNBt/7lmf5xcCPD3M6Ap//UsAHJCiD3phTtt4WkFkzWNfwfSJKBN3NALaHn9S
+            ILquEwjuKxbZUHB1w3ZZmLkSB1znQpo1pLkf7/WN4cDr9OCRqzz6cpYhBIplRsFQ
+            NZFRkIOAOyqXqyQX+Ny0UJ8nFyqXk1GvZfnVnrj4EDmT7H+eu0fjmsLL/i/qxGoe
+            CAJYsBECgYEA4Yi0XF32yYb6e2HACH59JUdGR4WW+vGedp2m2N8nDesnFz0THtxY
+            zexKzIjqJPnrj+7HgWxrnfE4JpI0uhxzk/i3b9e6maBPV4p2hBgYPoaS/nXIiHke
+            YtFd0z08pQOx0JFokzLtWNDJkniNBtuERxlcD/Mo5JaZNMUikltdyccCgYEAyhi2
+            8DYp8UOMZCkmV0Rwgug4LTK17X9HbK6DKtJTsOf+mdVegCMbwiELU0uiHsQoPdXl
+            HCFlECGydpwFKXQK42h5r8CpLEVSx/jNwXM7a0tEZIGF56812slTesn3gtVDFG+1
+            tO990NwIf5XKgZLexZC5tyyiZe4FFeIvGhHTrh0CgYEA0BjJAmkY6r4GpI1/GNdN
+            NXZcXGXg9061vhCdAIJ2kJsnCIQr/k+mCOs74Rl7of6P4dCaeMrHSYZnHv/McuUJ
+            p8DX0PSmklWen9F8pUluJVMaknuvOm03Ikq4Xc6lBEUybpWcfiWBZm/PbbyZs3gc
+            x1WY4oakdraWSmCTE6QGF8UCgYEAn1zTzSH4+v44E7d7O2+FhUTXH5UQbuJiESqf
+            1kGaqzKVyvq9FTAaMH/cLWfDxJ0L2o7zprYSuqDH2M35KBIQj/iPlG7JOFbGC1h/
+            758NaPMmUFbun57DSe5d/MKMgcfnqJLaZ34+6VbJAMq+sGR/dK1GNVJmERibPAFr
+            ARSzpmUCgYEA2Nmj6v1JIgZwC7FF3vM9ru0SidPaCnk67A3yDwgYGGAjByDTe1ql
+            lUyGcXDUyyi6t6j8vr1XicDxytZT46i9eFFLZ+Lp+/1dA81E3jGbjrCy+WAwftWS
+            7fn7/QG5sAVmb6VoEumCUaMpupL18eWHYSOCTGzUtyICDku9TMdhSu4=
+            -----END RSA PRIVATE KEY-----"""),
+              "",
+              ""
+            )
+            credentials_store.addCredentials(global_domain, credentials)
+
+
+            //
+            // ACTIVE DIRECTORY / LDAP
+            //
+            String domain = 'yourdomain'
+            String site = 'yourside'
+            String serverAddress = 'YOUR_SERVER_IP'
+            String bindName = 'your bind DN'
+            String bindPassword = 'YOUR BIND PWD'
+            // TODO Customize the values above and uncomment the lines below
+            // adrealm = new ActiveDirectorySecurityRealm(domain, site, bindName, bindPassword, serverAddress)
+            // instance.setSecurityRealm(adrealm)
+            //instance.save()
+
+
+            //
+            // GERRIT TRIGGER
+            //
+            sleep 10000
+
+            def gerrit_profile = "Demo Gerrit"
+            def gerrit_host_name = "rancher-agent-01.shared"
+            def gerrit_ssh_port = 29418
+            def gerrit_username = "jenkins"
+            def gerrit_front_end_url = "http://rancher-agent-01.shared:8082/"
+            def gerrit_email = "gerrit@mydomain.com"
+            // this file will be generated by the rancher sidekick and is configured in the metadata file
+            // see scmidrsakey in this rancher-compose.yml file (below)
+            def gerrit_ssh_key_file = "/usr/share/jenkins/rancher-seed/.ssh/id_rsa"
+            def gerrit_ssh_key_password = ""
+
+
+            if ( Jenkins.instance.pluginManager.activePlugins.find { it.shortName == "gerrit-trigger" } != null ) {
+              def gerrit_plugin = Jenkins.instance.getPlugin(com.sonyericsson.hudson.plugins.gerrit.trigger.PluginImpl.class)
+              gerrit_plugin.getPluginConfig().setNumberOfReceivingWorkerThreads(3)
+              gerrit_plugin.getPluginConfig().setNumberOfSendingWorkerThreads(1)
+
+              def gerrit_server = new GerritServer(gerrit_profile)
+              
+              def gerrit_server_exists = false
+              def gerrit_servers = gerrit_plugin.getServerNames()
+              gerrit_servers.each {
+                  server_name = (String) it
+                  if ( server_name == gerrit_server.getName() ) {
+                      gerrit_server_exists = true
+                      println("Found existing installation: " + server_name)
+                  }
+              }
+
+              if (!gerrit_server_exists) {
+                def gerrit_server_config = new Config()
+
+                gerrit_server_config.setGerritHostName(gerrit_host_name)
+                gerrit_server_config.setGerritFrontEndURL(gerrit_front_end_url)
+                gerrit_server_config.setGerritSshPort(gerrit_ssh_port)
+                gerrit_server_config.setGerritUserName(gerrit_username)
+                gerrit_server_config.setGerritEMail(gerrit_email)
+                gerrit_server_config.setGerritAuthKeyFile(new File(gerrit_ssh_key_file))
+                gerrit_server_config.setGerritAuthKeyFilePassword(gerrit_ssh_key_password)
+
+                gerrit_server.setConfig(gerrit_server_config)
+                gerrit_plugin.addServer(gerrit_server)
+
+                gerrit_server.start()
+                gerrit_server.startConnection()
+              }
+            }
+
+            // Save the state
+            instance.save()
+
+      scmurl: ssh://jenkins@rancher-agent-01.shared:29418/demo/rancher-jenkins-seed-jobs.git
+      scmpath: seed/demo_seed.groovy
+      scmidrsakey: |-
+            -----BEGIN RSA PRIVATE KEY-----
+            MIIEpQIBAAKCAQEAsgukTJroFQqDzf9Fiii1SVolbZc0c3Itcl1wLBME7a/4rrAJ
+            DNeVyck0ZY7T3/PnvjyZylcjSenpauhYCvAkQPUFu9P9onBPuWhXYEF5NANhrYEz
+            w2OG1RfN/yWZ8aYuuo0n1+LGQviUr6DSF5JBJPoaz2pj8lkDrWDeRPDWB/LZZg3c
+            FOJBqV+KKDFE8wpWrGx176S5zAoMLnaOp3WUP/4LHh/6bQYA/l++ieIwQxn0zprz
+            8sr/8UV5YUaAl3dYV8wpMrKXqWitDCKlw1f5A344XMf7+pLhYXA+QYnGmqi5KhDv
+            TWyq8HHJrxI1EZMscJE3juUJdeAixvSXnsodiwIDAQABAoIBAGUAibITZnkZP/BK
+            Ue6wbTcxdm4XCuA682EfdJTsLS2RWCfxIREx831HMPwz7CntuZeH1U6d5Bz4HzxQ
+            ljGOTWK0HQ6Skh3mTLPHZ1npipJhILZGx1CeU0zrdia58/zL41Jc5S9pLEOttNt1
+            BfntNBt/7lmf5xcCPD3M6Ap//UsAHJCiD3phTtt4WkFkzWNfwfSJKBN3NALaHn9S
+            ILquEwjuKxbZUHB1w3ZZmLkSB1znQpo1pLkf7/WN4cDr9OCRqzz6cpYhBIplRsFQ
+            NZFRkIOAOyqXqyQX+Ny0UJ8nFyqXk1GvZfnVnrj4EDmT7H+eu0fjmsLL/i/qxGoe
+            CAJYsBECgYEA4Yi0XF32yYb6e2HACH59JUdGR4WW+vGedp2m2N8nDesnFz0THtxY
+            zexKzIjqJPnrj+7HgWxrnfE4JpI0uhxzk/i3b9e6maBPV4p2hBgYPoaS/nXIiHke
+            YtFd0z08pQOx0JFokzLtWNDJkniNBtuERxlcD/Mo5JaZNMUikltdyccCgYEAyhi2
+            8DYp8UOMZCkmV0Rwgug4LTK17X9HbK6DKtJTsOf+mdVegCMbwiELU0uiHsQoPdXl
+            HCFlECGydpwFKXQK42h5r8CpLEVSx/jNwXM7a0tEZIGF56812slTesn3gtVDFG+1
+            tO990NwIf5XKgZLexZC5tyyiZe4FFeIvGhHTrh0CgYEA0BjJAmkY6r4GpI1/GNdN
+            NXZcXGXg9061vhCdAIJ2kJsnCIQr/k+mCOs74Rl7of6P4dCaeMrHSYZnHv/McuUJ
+            p8DX0PSmklWen9F8pUluJVMaknuvOm03Ikq4Xc6lBEUybpWcfiWBZm/PbbyZs3gc
+            x1WY4oakdraWSmCTE6QGF8UCgYEAn1zTzSH4+v44E7d7O2+FhUTXH5UQbuJiESqf
+            1kGaqzKVyvq9FTAaMH/cLWfDxJ0L2o7zprYSuqDH2M35KBIQj/iPlG7JOFbGC1h/
+            758NaPMmUFbun57DSe5d/MKMgcfnqJLaZ34+6VbJAMq+sGR/dK1GNVJmERibPAFr
+            ARSzpmUCgYEA2Nmj6v1JIgZwC7FF3vM9ru0SidPaCnk67A3yDwgYGGAjByDTe1ql
+            lUyGcXDUyyi6t6j8vr1XicDxytZT46i9eFFLZ+Lp+/1dA81E3jGbjrCy+WAwftWS
+            7fn7/QG5sAVmb6VoEumCUaMpupL18eWHYSOCTGzUtyICDku9TMdhSu4=
+            -----END RSA PRIVATE KEY-----
+    plugins: |-
+      structs
+      http_request

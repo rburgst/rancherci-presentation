@@ -1,0 +1,25 @@
+version: "2"
+
+services:
+  registry:
+    image: registry:2
+    restart: always
+    environment:
+      REGISTRY_STORAGE_DELETE_ENABLED: "true"
+      REGISTRY_STORAGE_FILESYSTEM_ROOTDIRECTORY: "/var/lib/registry"
+    ports:
+      - "5000:5000"
+      - "6000:6000"
+    volumes:
+    - ./registry-data:/var/lib/registry
+  registry-gui:
+    image: rancher-server:5000/konradkleine/docker-registry-frontend:v2
+    environment: 
+      ENV_DOCKER_REGISTRY_HOST: "rancher-server"
+      ENV_DOCKER_REGISTRY_PORT: 5000
+    ports:
+      - "9000:80"
+  rancher-server:
+    image: rancher-server:5000/rancher/server
+    ports:
+      - "8080:8080"

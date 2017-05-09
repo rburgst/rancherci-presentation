@@ -1,0 +1,6 @@
+stacks/repository-nexus/nexus-data
+01-setupvms/registry-data
+stacks/jenkins/jenkins_home-minimal
+stacks/jenkins/jenkins_home
+stacks/gerrit/gerrit_data
+stacks/jenkins/swarm-workspace

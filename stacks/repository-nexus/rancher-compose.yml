@@ -1,0 +1,211 @@
+version: '2'
+services:
+  # main nexus service
+  nexus:
+    scale: 1
+    start_on_create: true
+    metadata:
+      nexus:
+        config: |-
+            package nexus
+
+            import groovy.json.JsonSlurper
+            import groovy.xml.MarkupBuilder
+
+            import org.sonatype.nexus.ldap.persist.*
+            import org.sonatype.nexus.ldap.persist.entity.*
+            import org.sonatype.nexus.repository.manager.RepositoryManager
+            import org.sonatype.nexus.repository.maven.VersionPolicy
+            import org.sonatype.nexus.repository.storage.WritePolicy
+            import org.sonatype.nexus.repository.maven.LayoutPolicy
+            import org.sonatype.nexus.blobstore.api.BlobStoreManager
+            import org.sonatype.nexus.security.authz.AuthorizationManager
+            import org.sonatype.nexus.security.role.NoSuchRoleException
+            import org.sonatype.nexus.security.role.Role
+
+            // for the presentation we ignore security but leave the stuff in here for reference
+            def enableLdap = false
+
+            //
+            // LDAP Configuration
+            //
+
+            def yourLdapPort = 389
+            def ldap = new JsonSlurper().parseText('{"host": "YOUR_LDAP_SERVER_IP", "port": ' + yourLdapPort + ', "name": "YOUR_LDAP"}')
+            def ldapConfigurationManager = container.lookup(LdapConfigurationManager.class.name)
+
+            // for the presentation we disable creation of the ldap settings, however this can serve as a basis for customization
+            if ( enableLdap && ldapConfigurationManager.listLdapServerConfigurations().isEmpty() ) {
+                ldapConfigurationManager.addLdapServerConfiguration(
+                        new LdapConfiguration(
+                                name: ldap.name,
+                                connection: new Connection(
+                                        host: new Connection.Host(Connection.Protocol.ldap, ldap.host, ldap.port),
+                                        maxIncidentsCount: 3,
+                                        connectionRetryDelay: 300,
+                                        connectionTimeout: 15,
+                                        searchBase: 'YOUR_SEARCH_BASE',
+                                        authScheme: 'simple',
+                                        systemPassword: 'YOUR_SYSTEM_PASSWORD',
+                                        systemUsername: 'YOUR_SYSTEM_USER_CN'
+                                ),
+                                mapping: new Mapping(
+                                        userSubtree: true,
+                                        ldapGroupsAsRoles: true,
+                                        emailAddressAttribute: 'mail',
+                                        userIdAttribute: 'sAMAccountName',
+                                        userMemberOfAttribute: 'memberOf',
+                                        userObjectClass: 'user',
+                                        userPasswordAttribute: '',
+                                        userRealNameAttribute: 'cn',
+                                        userBaseDn: 'YOUR_USER_BASE_DN'
+                                )
+                        )
+                )
+            } else {
+                // do nothing
+            }
+
+
+            // BLOB Store
+            def customStore = blobStore.blobStoreManager.get("tmp")
+            if (customStore != null){
+                log.info("BlobStore tmp already exists")
+            } else {
+                blobStore.createFileBlobStore('tmp', 'tmp') // name, path
+                customStore = blobStore.blobStoreManager.get("tmp")
+                log.info("BlobStore tmp created")
+            }
+
+
+            //
+            // Repositories
+            //
+
+            def manager = container.lookup(RepositoryManager.class.name)
+            def newRepositories = []
+
+            def storeName = blobStore.blobStoreManager.get("tmp").getBlobStoreConfiguration().getName()
+
+            // Proxied Maven Repositories
+
+            if (!manager.exists("jcenter-maven")) {
+                newRepositories << repository.createMavenProxy('jcenter-maven', 'https://jcenter.bintray.com')
+
+                log.info('creating repository jcenter-maven completed successfully')
+            } else {
+                log.info("repository jcenter-maven already exists")
+            }
+
+            // Private Maven und Docker Repositories
+
+            if (!manager.exists("private_maven_releases")) {
+                newRepositories << repository.createMavenHosted('private_maven_releases', storeName,
+                        false, VersionPolicy.RELEASE, WritePolicy.ALLOW, LayoutPolicy.STRICT)
+                // Default values of createMavenHosted() are fine for release repositories (except updates should be allowed)
+                // See https://books.sonatype.com/nexus-book/3.0/reference/scripting.html chapter 15.2
+
+                log.info('creating repository private_maven_releases completed successfully')
+            } else {
+                log.info("repository private_maven_releases already exists")
+            }
+
+            if (!manager.exists("private_maven_snapshots")) {
+                newRepositories << repository.createMavenHosted('private_maven_snapshots', storeName,
+                        false, VersionPolicy.SNAPSHOT, WritePolicy.ALLOW, LayoutPolicy.STRICT)
+
+                log.info('creating repository private_maven_snapshots completed successfully')
+            } else {
+                log.info("repository private_maven_snapshots already exists")
+            }
+
+            if (!manager.exists("private_docker")) {
+                // TODO setup key infrastructure for HTTPS connector 
+                newRepositories << repository.createDockerHosted('private_docker', 5000, null)
+
+                log.info('creating repository private_docker completed successfully')
+            } else {
+                log.info("repository private_docker already exists")
+            }
+
+
+            if (enableLdap) {
+                //
+                // Roles
+                //
+
+                //
+                // Disable anonymous access
+                //
+                security.setAnonymousAccess(false)
+                log.info('Anonymous access disabled')
+
+                def authorizationManager = container.lookup(AuthorizationManager.class.name)
+
+                def roleMap = [:]
+                roleMap["private-developers"] = [
+                    "nx-repository-admin-docker-private_docker-*",
+                    "nx-repository-admin-maven2-private_maven_releases-*",
+                    "nx-repository-admin-maven2-private_maven_snapshots-*",
+                    "nx-repository-admin-maven2-maven-central-*",
+                    "nx-repository-view-docker-private_docker-*",
+                    "nx-repository-view-maven2-private_maven_releases-*",
+                    "nx-repository-view-maven2-private_maven_snapshots-*",
+                    "nx-repository-view-maven2-jcenter-maven-*",
+                    "nx-repository-view-maven2-maven-central-*",
+                    "nx-repository-view-maven2-maven-public-*"
+                    ]
+
+                roleMap.each{ roleName, privileges ->
+                    try {
+                        def role = authorizationManager.getRole(roleName)
+
+                        log.info("Role " + roleName + " already exists. Reallocating...")
+                        authorizationManager.deleteRole(roleName)
+
+                        addRole(authorizationManager, roleName, privileges)
+                    } catch ( NoSuchRoleException e ) {
+                        addRole(authorizationManager, roleName, privileges)
+                    }
+                }
+
+            }
+
+            void addRole(AuthorizationManager authorizationManager, String roleName, List privileges) {
+                authorizationManager.addRole(
+                    // Es ist hier auch die Angabe der Proxy/Hosted Repositories erforderlich, selbst wenn das Group Repository selbst freigegeben ist.
+                    new Role(roleId: roleName,
+                        name: roleName,
+                        description: null,
+                        source: "LDAP",
+                        readOnly: false,
+                        roles: null,
+                        privileges: privileges
+                    )
+                )
+            }
+
+            //
+            // Response
+            //
+
+            // Build up an XML response containing the urls for newly created repositories
+            def writer = new StringWriter()
+            def xml = new MarkupBuilder(writer)
+            xml.repositories() {
+                newRepositories.each { repo ->
+                    repository(name: repo.name, url: repo.url)
+                }
+            }
+
+            return writer.toString()
+
+  # confd to write the groovy file
+  nexus-confd:
+    scale: 1
+    start_on_create: true
+
+  # provision by uploading the groovy file via HTTP and executing it
+  nexus-provision:
+    scale: 1
+    start_on_create: true
