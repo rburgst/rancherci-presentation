@@ -175,3 +175,5 @@ Please also see the accompanying other github repositories
 * http://rancher.com/deploying-a-scalable-jenkins-cluster-with-docker-and-rancher/
 * http://rancher.com/tag/jenkins/
 * http://rancher.com/docker-based-build-pipelines-part-1-continuous-integration-and-testing/
+
+More details can be found at [Lanyrd](http://lanyrd.com/2017/spring-io/sfqtth/).
