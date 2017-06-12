@@ -9,8 +9,8 @@ of:
 
 Please also see the accompanying other github repositories
 
-* rancherci-seed
-* rancherci-webshop
+* https://github.com/rburgst/rancherci-seedjob
+* https://github.com/rburgst/rancherci-demoapp
 
 # Basic Setup
 
